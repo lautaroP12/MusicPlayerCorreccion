@@ -5,6 +5,8 @@ import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
 import javafx.scene.control.cell.PropertyValueFactory;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import javafx.scene.media.Media;
 import javafx.scene.media.MediaPlayer;
 import javafx.stage.FileChooser;
@@ -12,14 +14,14 @@ import javafx.util.Duration;
 import org.jaudiotagger.audio.AudioFile;
 import org.jaudiotagger.audio.AudioFileIO;
 import org.jaudiotagger.tag.FieldKey;
-import javafx.scene.image.Image;
-import javafx.scene.image.ImageView;
-
-import java.io.File;
-import java.util.*;
-
 import recursos.ListaDoble;
 import recursos.ListaOrdenada;
+import recursos.NodoDoble;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 public class ReproductorController {
 
@@ -34,6 +36,13 @@ public class ReproductorController {
 
     @FXML
     private TableColumn<Song, String> colAnio;
+
+    @FXML
+    private TableColumn<Song, String> colAlbum;
+
+    @FXML
+    private TableColumn<Song, String> colDuracion;
+
 
     @FXML
     private Label lblCancion;
@@ -63,96 +72,79 @@ public class ReproductorController {
     private Slider sliderVolumen;
 
     @FXML
-    private TableColumn<Song, String> colAlbum;
-
-    @FXML
-    private TableColumn<Song, String> colDuracion;
-
-    @FXML
     private ImageView imgCover;
 
-    private ListaDoble canciones =
-            new ListaDoble();
+    private ListaDoble canciones = new ListaDoble();
 
-    private final ObservableList<Song> observableCanciones =
-            FXCollections.observableArrayList();
+    private final ObservableList<Song> observableCanciones = FXCollections.observableArrayList();
 
     private MediaPlayer mediaPlayer;
 
-    private int indiceActual = -1;
+    private NodoDoble nodoActual = null;
+
+    private final List<NodoDoble> randomPendientes = new ArrayList<>();
 
     private boolean pausado = false;
-
-    private final ListaDoble randomPendientes =
-            new ListaDoble();
 
     private String criterioActual = "nombre";
 
     @FXML
-    public void ordenarPorNombre() {
-        ordenar("nombre");
-    }
+    public void ordenarPorNombre() { ordenar("nombre"); }
 
     @FXML
-    public void ordenarPorArtista() {
-        ordenar("artista");
-    }
+    public void ordenarPorArtista() { ordenar("artista"); }
 
     @FXML
-    public void ordenarPorAnio() {
-        ordenar("anio");
-    }
+    public void ordenarPorAnio() { ordenar("anio"); }
 
     @FXML
     public void initialize() {
-
         tablaCanciones.setItems(observableCanciones);
-        tablaCanciones.setColumnResizePolicy(
-                TableView.CONSTRAINED_RESIZE_POLICY_ALL_COLUMNS
-        );
 
-        colNombre.setCellValueFactory(
-                new PropertyValueFactory<>("nombre"));
+        // Habilitar selección múltiple para eliminar varias canciones a la vez
+        tablaCanciones.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
 
-        colArtista.setCellValueFactory(
-                new PropertyValueFactory<>("artista"));
+        colNombre.setCellValueFactory(new PropertyValueFactory<>("nombre"));
 
-        colAnio.setCellValueFactory(
-                new PropertyValueFactory<>("anio"));
-        colAlbum.setCellValueFactory(
-                new PropertyValueFactory<>("album"));
+        colArtista.setCellValueFactory(new PropertyValueFactory<>("artista"));
 
-        colDuracion.setCellValueFactory(
-                new PropertyValueFactory<>("duracion"));
+        colAnio.setCellValueFactory(new PropertyValueFactory<>("anio"));
 
-        sliderVolumen.valueProperty().addListener(
-                (obs, oldVal, newVal) -> {
+        colAlbum.setCellValueFactory(new PropertyValueFactory<>("album"));
 
-                    if (mediaPlayer != null) {
+        colDuracion.setCellValueFactory(new PropertyValueFactory<>("duracion"));
 
-                        mediaPlayer.setVolume(
-                                newVal.doubleValue() / 100.0
-                        );
+        tablaCanciones.setRowFactory(tv -> new TableRow<Song>() {
+            @Override
+            protected void updateItem(Song item, boolean empty) {
+                super.updateItem(item, empty);
+                if (item == null || empty) {
+                    getStyleClass().remove("playing-row");
+                } else {
+                    // Ahora validamos por la identidad de la canción dentro del nodo actual
+                    if (nodoActual != null && nodoActual.getNodoInfo() == item) {
+                        if (!getStyleClass().contains("playing-row")) {
+                            getStyleClass().add("playing-row");
+                        }
+                    } else {
+                        getStyleClass().remove("playing-row");
                     }
                 }
-        );
+            }
+        });
 
-        // tablaCanciones.setItems(canciones);
+        sliderVolumen.valueProperty().addListener((obs, oldVal, newVal) -> {
+            if (mediaPlayer != null) {
+                mediaPlayer.setVolume(newVal.doubleValue() / 100.0);
+            }
+        });
 
         tablaCanciones.setOnMouseClicked(e -> {
-
             if (e.getClickCount() == 2) {
-
-                Song song =
-                        tablaCanciones.getSelectionModel()
-                                .getSelectedItem();
-
+                Song song = tablaCanciones.getSelectionModel().getSelectedItem();
                 if (song != null) {
-
-                    indiceActual =
-                            canciones.indexOf(song);
-
-                    reproducir(song);
+                    nodoActual = canciones.buscarNodo(song);
+                    reproducirActual();
                 }
             }
         });
@@ -160,191 +152,123 @@ public class ReproductorController {
 
     @FXML
     public void agregarCanciones() {
-
         FileChooser chooser = new FileChooser();
 
-        chooser.getExtensionFilters().add(
-                new FileChooser.ExtensionFilter(
-                        "MP3",
-                        "*.mp3"
-                )
-        );
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("MP3", "*.mp3"));
 
         List<File> archivos = chooser.showOpenMultipleDialog(null);
 
-        if (archivos == null) {
-            return;
-        }
+        if (archivos == null) return;
+
         for (File file : archivos) {
             try {
+                AudioFile audioFile = AudioFileIO.read(file);
 
-                AudioFile audioFile =
-                        AudioFileIO.read(file);
+                String titulo = audioFile.getTag().getFirst(FieldKey.TITLE);
 
-                String titulo =
-                        audioFile.getTag()
-                                .getFirst(FieldKey.TITLE);
+                String artista = audioFile.getTag().getFirst(FieldKey.ARTIST);
 
-                String artista =
-                        audioFile.getTag()
-                                .getFirst(FieldKey.ARTIST);
+                String album = audioFile.getTag().getFirst(FieldKey.ALBUM);
 
-                String album =
-                        audioFile.getTag()
-                                .getFirst(FieldKey.ALBUM);
+                String anio = audioFile.getTag().getFirst(FieldKey.YEAR);
 
-                String anio =
-                        audioFile.getTag()
-                                .getFirst(FieldKey.YEAR);
+                int segundos = audioFile.getAudioHeader().getTrackLength();
 
-                int segundos =
-                        audioFile.getAudioHeader()
-                                .getTrackLength();
+                String duracion = String.format("%02d:%02d", segundos / 60, segundos % 60);
 
-                String duracion =
-                        String.format(
-                                "%02d:%02d",
-                                segundos / 60,
-                                segundos % 60
-                        );
+                if (titulo.isEmpty()) titulo = file.getName().replace(".mp3", "");
 
-                if (titulo.isEmpty()) {
-                    titulo = file.getName()
-                            .replace(".mp3", "");
-                }
+                if (artista.isEmpty()) artista = "Desconocido";
 
-                if (artista.isEmpty()) {
-                    artista = "Desconocido";
-                }
+                if (album.isEmpty()) album = "Desconocido";
 
-                if (album.isEmpty()) {
-                    album = "Desconocido";
-                }
-
-                if (anio.isEmpty()) {
-                    anio = "----";
-                }
+                if (anio.isEmpty()) anio = "----";
 
                 Image portada;
-
                 try {
-
                     if (audioFile.getTag().getFirstArtwork() != null) {
-
-                        byte[] imagenBytes =
-                                audioFile.getTag()
-                                        .getFirstArtwork()
-                                        .getBinaryData();
-
-                        portada = new Image(
-                                new java.io.ByteArrayInputStream(
-                                        imagenBytes
-                                )
-                        );
-
+                        byte[] imgBytes = audioFile.getTag().getFirstArtwork().getBinaryData();
+                        portada = new Image(new java.io.ByteArrayInputStream(imgBytes));
                     } else {
-
-                        portada = new Image(
-                                getClass().getResourceAsStream(
-                                        "/default_cover.png"
-                                )
-                        );
+                        portada = new Image(getClass().getResourceAsStream("/default_cover.png"));
                     }
-
                 } catch (Exception e) {
-
-                    portada = new Image(
-                            getClass().getResourceAsStream(
-                                    "/default_cover.png"
-                            )
-                    );
+                    portada = new Image(getClass().getResourceAsStream("/default_cover.png"));
                 }
 
-                canciones.add(
-                        new Song(
-                                titulo,
-                                artista,
-                                album,
-                                anio,
-                                duracion,
-                                file.getAbsolutePath(),
-                                portada
-                        )
-                );
+                canciones.add(new Song(titulo, artista, album, anio, duracion, file.getAbsolutePath(), portada));
             } catch (Exception e) {
-
                 e.printStackTrace();
             }
         }
         randomPendientes.clear();
-        //ordenar(criterioActual);
-        observableCanciones.clear();
-
-        for (Object obj : canciones) {
-            observableCanciones.add((Song) obj);
-        }
+        ordenar(criterioActual);
     }
 
     @FXML
     public void eliminarCancion() {
+        List<Song> seleccionadas = new ArrayList<>(tablaCanciones.getSelectionModel().getSelectedItems());
 
-        Song song =
-                tablaCanciones.getSelectionModel()
-                        .getSelectedItem();
-
-        if (song != null) {
-            canciones.remove(song);
-            observableCanciones.remove(song);
+        if (!seleccionadas.isEmpty()) {
+            for (Song song : seleccionadas) {
+                if (nodoActual != null && nodoActual.getNodoInfo().equals(song)) { //Si se desea eliminar la cancion que se esta reproduciendo
+                    stop();
+                }
+                canciones.remove(song);
+                observableCanciones.remove(song);
+            }
+            randomPendientes.clear();
+            tablaCanciones.refresh();
         }
+    }
+
+    @FXML
+    public void limpiarLista() {
+        stop();
+        canciones.clear();
+        observableCanciones.clear();
         randomPendientes.clear();
         tablaCanciones.refresh();
     }
 
     @FXML
     public void togglePlayPause() {
-
         if (mediaPlayer == null) {
-
             if (!canciones.isEmpty()) {
-
-                indiceActual = 0;
-
-                reproducir((Song) canciones.get(0));
+                if (nodoActual == null) {
+                    nodoActual = canciones.getCabeza();
+                }
+                reproducirActual();
             }
-
             return;
         }
 
         if (pausado) {
-
             mediaPlayer.play();
-
             btnPlayPause.setText("⏸");
-
             pausado = false;
 
         } else {
-
             mediaPlayer.pause();
-
             btnPlayPause.setText("▶");
-
             pausado = true;
         }
     }
 
-    private void reproducir(Song song) {
+    private void reproducirActual() {
+        if (nodoActual != null) {
+            reproducir((Song) nodoActual.getNodoInfo());
+        }
+    }
 
+    private void reproducir(Song song) {
         if (mediaPlayer != null) {
             mediaPlayer.stop();
         }
 
-        Media media =
-                new Media(
-                        new File(song.getRuta())
-                                .toURI()
-                                .toString()
-                );
+        tablaCanciones.refresh();
+
+        Media media = new Media(new File(song.getRuta()).toURI().toString());
 
         mediaPlayer = new MediaPlayer(media);
 
@@ -360,14 +284,11 @@ public class ReproductorController {
 
         imgCover.setImage(song.getPortada());
 
-        mediaPlayer.currentTimeProperty().addListener(
-                (obs, oldTime, newTime) -> {
+        mediaPlayer.currentTimeProperty().addListener((obs, oldTime, newTime) -> {
+            sliderTiempo.setValue(newTime.toSeconds());
 
-                    sliderTiempo.setValue(newTime.toSeconds());
-
-                    lblTiempoActual.setText(formatTime(newTime));
-                }
-        );
+            lblTiempoActual.setText(formatTime(newTime));
+        });
 
         mediaPlayer.setOnReady(() -> {
 
@@ -378,9 +299,7 @@ public class ReproductorController {
             lblDuracion.setText(formatTime(total));
         });
 
-        mediaPlayer.setVolume(
-                sliderVolumen.getValue() / 100.0
-        );
+        mediaPlayer.setVolume(sliderVolumen.getValue() / 100.0);
 
         sliderVolumen.setOnScroll(event -> {
 
@@ -415,93 +334,101 @@ public class ReproductorController {
     }
 
     private void manejarFinCancion() {
-
         if (checkRandom.isSelected()) {
             reproducirRandom();
             return;
         }
-        indiceActual++;
-        if (indiceActual >= canciones.size()) {
+
+        if (nodoActual != null && nodoActual.getNextNodo() != null) {
+
+            nodoActual = nodoActual.getNextNodo();
+
+            reproducirActual();
+
+        } else {
+
             if (checkLoop.isSelected()) {
-                indiceActual = 0;
+
+                nodoActual = canciones.getCabeza();
+
+                reproducirActual();
+
             } else {
-                btnPlayPause.setText("▶");
-                return;
+                stop();
             }
         }
-        reproducir((Song) canciones.get(indiceActual));
     }
 
     @FXML
     public void siguiente() {
+        if (canciones.isEmpty()) return;
 
-        if (canciones.isEmpty()) {
-            return;
-        }
         if (checkRandom.isSelected()) {
+
             reproducirRandom();
             return;
         }
-        indiceActual++;
-        if (indiceActual >= canciones.size()) {
+        if (nodoActual != null && nodoActual.getNextNodo() != null) {
+
+            nodoActual = nodoActual.getNextNodo();
+
+            reproducirActual();
+        } else {
             if (checkLoop.isSelected()) {
-                indiceActual = 0;
+
+                nodoActual = canciones.getCabeza();
+
+                reproducirActual();
             } else {
-                indiceActual = canciones.size() - 1;
-                return;
+                stop();
             }
         }
-        reproducir((Song) canciones.get(indiceActual));
     }
 
     @FXML
     public void anterior() {
+        if (canciones.isEmpty()) return;
 
-        if (canciones.isEmpty()) {
-            return;
-        }
-        indiceActual--;
-        if (indiceActual < 0) {
+        if (nodoActual != null && nodoActual.getPrevNodo() != null) {
+
+            nodoActual = nodoActual.getPrevNodo();
+
+            reproducirActual();
+        } else {
             if (checkLoop.isSelected()) {
-                indiceActual = canciones.size() - 1;
+
+                nodoActual = canciones.getCola();
+
+                reproducirActual();
             } else {
-                indiceActual = 0;
-                return;
+
+                nodoActual = canciones.getCabeza();
+
+                reproducirActual();
             }
         }
-        reproducir((Song) canciones.get(indiceActual));
     }
 
-
     private void reproducirRandom() {
-
         if (randomPendientes.isEmpty()) {
-            int total = canciones.size();
-            int[] indices = new int[total];
-            for (int i = 0; i < total; i++) {
-                indices[i] = i;
+            NodoDoble actual = canciones.getCabeza();
+
+            while (actual != null) {
+                randomPendientes.add(actual);
+                actual = actual.getNextNodo();
             }
-            Random random = new Random();
-            for (int i = total - 1; i > 0; i--) {
-                int j = random.nextInt(i + 1);
-                int temp = indices[i];
-                indices[i] = indices[j];
-                indices[j] = temp;
-            }
-            for (int indice : indices) {
-                randomPendientes.add(indice);
-            }
+            Collections.shuffle(randomPendientes);
         }
-        indiceActual = (Integer) randomPendientes.remove(0);
-        reproducir((Song) canciones.get(indiceActual));
+
+        if (!randomPendientes.isEmpty()) {
+            nodoActual = randomPendientes.remove(0);
+            reproducirActual();
+        }
     }
 
     private String formatTime(Duration duration) {
-
         int minutos = (int) duration.toMinutes();
-
         int segundos = (int) duration.toSeconds() % 60;
-
         return String.format("%02d:%02d", minutos, segundos);
     }
 
@@ -509,41 +436,57 @@ public class ReproductorController {
         this.criterioActual = criterio;
         ListaOrdenada ordenada = new ListaOrdenada();
 
-        for (Object obj : canciones) { // paso los elementos de la lista a la nueva lista ordenada
+        for (Object obj : canciones) {
             Song song = (Song) obj;
+
             if (criterio.equalsIgnoreCase("artista")) {
                 ordenada.addOrderedPorArtista(song);
+
             } else if (criterio.equalsIgnoreCase("anio")) {
                 ordenada.addOrderedPorAnio(song);
+
             } else {
                 ordenada.addOrderedPorNombre(song);
             }
         }
-        this.canciones = ordenada;  //actualizo la lista actual, a la lista ordenada
+        this.canciones = ordenada;
+
         observableCanciones.clear();
+
         for (Object obj : canciones) {
             observableCanciones.add((Song) obj);
         }
-        // Si hay una canción reproduciéndose, recalculamos su índice en la nueva lista
-        Song seleccionada = tablaCanciones.getSelectionModel().getSelectedItem();
-        if (seleccionada != null) {
-            indiceActual = canciones.indexOf(seleccionada);
+
+        if (nodoActual != null) {
+            Song cancionSonando = (Song) nodoActual.getNodoInfo();
+            nodoActual = canciones.buscarNodo(cancionSonando);
         }
+        randomPendientes.clear();
+
+        tablaCanciones.refresh();
     }
+
     @FXML
     public void stop() {
+
         if (mediaPlayer != null) {
             mediaPlayer.stop();
             mediaPlayer = null;
         }
         pausado = false;
+
         btnPlayPause.setText("▶");
-        indiceActual = -1; // Reseteamos el índice
+
+        nodoActual = null; // Reseteamos el puntero a nulo
 
         lblCancion.setText("No hay canción");
+
         lblArtista.setText("...");
+
         imgCover.setImage(null);
+
         sliderTiempo.setValue(0);
+
         lblTiempoActual.setText("00:00");
 
         tablaCanciones.refresh();
