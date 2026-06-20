@@ -20,10 +20,6 @@ public class ListaDoble implements Iterable<Object> {
         return tamanio == 0;
     }
 
-    public int size() {
-        return tamanio;
-    }
-
     public void add(Object info) { //agrega al final//
         NodoDoble nuevo = new NodoDoble(info);
 
@@ -80,11 +76,6 @@ public class ListaDoble implements Iterable<Object> {
         tamanio++;
     }
 
-    public Object get(int indice) {
-        verificarIndice(indice);
-        return getNodo(indice).getNodoInfo();
-    }
-
     public boolean remove(Object info) {
         NodoDoble actual = cabeza;
 
@@ -99,49 +90,10 @@ public class ListaDoble implements Iterable<Object> {
         return false;
     }
 
-    public Object remove(int indice) {
-        verificarIndice(indice);
-        NodoDoble nodo = getNodo(indice);
-        desconectar(nodo);
-        tamanio--;
-        return nodo.getNodoInfo();
-    }
-
-    public int indexOf(Object info) {
-        NodoDoble actual = cabeza;
-        int indice = 0;
-
-        while (actual != null) {
-            if (actual.getNodoInfo().equals(info)) {
-                return indice;
-            }
-            actual = actual.getNextNodo();
-            indice++;
-        }
-        return -1;
-    }
-
     public void clear() {
         cabeza = null;
         cola = null;
         tamanio = 0;
-    }
-
-    private NodoDoble getNodo(int indice) {
-        NodoDoble actual;
-
-        if (indice < tamanio / 2) {
-            actual = cabeza;
-            for (int i = 0; i < indice; i++) {
-                actual = actual.getNextNodo();
-            }
-        } else {
-            actual = cola;
-            for (int i = tamanio - 1; i > indice; i--) {
-                actual = actual.getPrevNodo();
-            }
-        }
-        return actual;
     }
 
     private void desconectar(NodoDoble nodo) {
@@ -157,15 +109,6 @@ public class ListaDoble implements Iterable<Object> {
             next.setPrevNodo(prev);
         } else {
             cola = prev;
-        }
-    }
-
-    private void verificarIndice(int indice) {
-
-        if (indice < 0 || indice >= tamanio) {
-            throw new IndexOutOfBoundsException(
-                    "Indice fuera de rango"
-            );
         }
     }
 
@@ -191,5 +134,23 @@ public class ListaDoble implements Iterable<Object> {
                 return dato;
             }
         };
+    }
+    public NodoDoble getCabeza() {
+        return cabeza;
+    }
+
+    public NodoDoble getCola() {
+        return cola;
+    }
+
+    public NodoDoble buscarNodo(Object info) {
+        NodoDoble actual = cabeza;
+        while (actual != null) {
+            if (actual.getNodoInfo().equals(info)) {
+                return actual;
+            }
+            actual = actual.getNextNodo();
+        }
+        return null;
     }
 }
